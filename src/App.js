@@ -119,12 +119,15 @@ export default function App() {
   };
 
   const saveLog = async (userId, date, data) => {
+    const cleaned = Object.fromEntries(
+      Object.entries(data).map(([k, v]) => [k, v === '' ? null : v])
+    );
     const existing = getLog(userId, date);
     if (existing) {
-      const { data: updated } = await supabase.from('logs').update(data).eq('id', existing.id).select().single();
+      const { data: updated } = await supabase.from('logs').update(cleaned).eq('id', existing.id).select().single();
       if (updated) setLogs(prev => prev.map(l => l.id === updated.id ? updated : l));
     } else {
-      const { data: created } = await supabase.from('logs').insert({ user_id: userId, date, ...data }).select().single();
+      const { data: created } = await supabase.from('logs').insert({ user_id: userId, date, ...cleaned }).select().single();
       if (created) setLogs(prev => [created, ...prev]);
     }
     setShowLog(false);
@@ -209,83 +212,83 @@ function Header({ me, users, onSwitch, onAdd }) {
 function SquadView({ users, userLogs, getLog, streak }) {
   if (!users.length) return <Empty msg="no squad yet" />;
   const dow = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-  const ranked = [...users].map(u => ({
-    u, score: avgGoalScore(userLogs(u.id), u.goals || {}),
-    log: getLog(u), s: streak(u.id),
-  })).sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ fontSize: 12, color: 'var(--text-3)', fontFamily: 'var(--mono)', paddingBottom: 4 }}>{dow.toLowerCase()}</div>
-      {ranked.map(({ u, score, log, s }, i) => (
-        <SquadCard key={u.id} user={u} log={log} streak={s} score={score} rank={i + 1} />
+      {users.map(u => (
+        <SquadCard key={u.id} user={u} log={getLog(u)} streak={streak(u.id)} recentLogs={userLogs(u.id)} />
       ))}
     </div>
   );
 }
 
-function SquadCard({ user, log, streak, score, rank }) {
+function SquadCard({ user, log, streak, recentLogs }) {
   const goals = user.goals || {};
-  const showMetrics = METRICS.filter(m => log?.[m.key] != null && log[m.key] !== '');
   const didExercise = log?.exercised === true;
+
+  // avg of last 3 completed days (excluding today)
+  const today = todayStr();
+  const last3 = [...recentLogs]
+    .filter(l => l.date !== today)
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .slice(0, 3);
+
+  const avgMetric = key => {
+    const vals = last3.map(l => l[key]).filter(v => v != null && v !== '');
+    if (!vals.length) return null;
+    return Math.round(vals.reduce((a, b) => a + Number(b), 0) / vals.length);
+  };
+
+  const displayMetrics = METRICS.filter(m => m.key !== 'weight');
 
   return (
     <div className="card">
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-3)', width: 18, textAlign: 'center', flexShrink: 0 }}>
-          {score != null ? `#${rank}` : '—'}
-        </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
         <div className="avatar" style={colorFor(user.color_idx || 0)}>{initials(user.name)}</div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ fontWeight: 500, fontSize: 14 }}>{user.name}</span>
             {streak > 0 && <span className="badge badge-amber" style={{ fontSize: 10 }}>🔥 {streak}d</span>}
           </div>
-          {score != null ? (
-            <div style={{ marginTop: 6 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-                <span style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--mono)' }}>avg goal score</span>
-                <span style={{ fontSize: 12, fontFamily: 'var(--mono)', fontWeight: 500, color: scoreColor(score) }}>{score}%</span>
-              </div>
-              <div className="progress-track">
-                <div className="progress-fill" style={{ width: `${score}%`, background: scoreColor(score) }} />
-              </div>
-            </div>
-          ) : (
-            <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 3 }}>no completed days yet</div>
-          )}
         </div>
-        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          {log?.exercised != null && <span style={{ fontSize: 14 }}>{didExercise ? '💪' : '🛋'}</span>}
           <div className={`badge ${log ? 'badge-green' : 'badge-gray'}`} style={{ fontSize: 10 }}>
             {log ? '✓ today' : 'not yet'}
           </div>
-          {log?.exercised != null && (
-            <div style={{ fontSize: 13, marginTop: 4 }}>{didExercise ? '💪' : '🛋'}</div>
-          )}
         </div>
       </div>
-      {showMetrics.length > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(showMetrics.length, 4)}, 1fr)`, gap: 8, marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
-          {showMetrics.map(m => {
-            const val = log[m.key];
-            const goal = goals[m.key] || m.goal;
-            const p = pct(val, goal);
-            return (
-              <div key={m.key} style={{ background: 'var(--bg)', borderRadius: 8, padding: '8px 10px', textAlign: 'center' }}>
-                <div style={{ fontSize: 10, color: 'var(--text-3)', marginBottom: 2 }}>{m.label}</div>
-                <div style={{ fontFamily: 'var(--mono)', fontWeight: 500, fontSize: 13 }}>
-                  {m.key === 'weight' ? fmt(val, 1) : fmt(val)}
-                  {m.unit && <span style={{ fontSize: 10, color: 'var(--text-3)', marginLeft: 1 }}>{m.unit}</span>}
-                </div>
-                {p !== null && (
-                  <div className="progress-track" style={{ marginTop: 4 }}>
-                    <div className="progress-fill" style={{ width: `${p}%`, background: m.color }} />
+
+      {last3.length > 0 ? (
+        <div>
+          <div style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--mono)', marginBottom: 8 }}>
+            avg last {last3.length} day{last3.length > 1 ? 's' : ''}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${displayMetrics.length}, 1fr)`, gap: 8 }}>
+            {displayMetrics.map(m => {
+              const avg = avgMetric(m.key);
+              const goal = goals[m.key] || m.goal;
+              const p = avg != null && goal ? pct(avg, goal) : null;
+              return (
+                <div key={m.key} style={{ background: 'var(--bg)', borderRadius: 8, padding: '8px 10px', textAlign: 'center' }}>
+                  <div style={{ fontSize: 10, color: 'var(--text-3)', marginBottom: 3 }}>{m.label}</div>
+                  <div style={{ fontFamily: 'var(--mono)', fontWeight: 500, fontSize: 14, color: avg != null ? 'var(--text)' : 'var(--text-3)' }}>
+                    {avg != null ? avg.toLocaleString() : '—'}
+                    {m.unit && avg != null && <span style={{ fontSize: 10, color: 'var(--text-3)', marginLeft: 1 }}>{m.unit}</span>}
                   </div>
-                )}
-              </div>
-            );
-          })}
+                  {goal && <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 2 }}>goal {goal.toLocaleString()}</div>}
+                  {p !== null && (
+                    <div className="progress-track" style={{ marginTop: 5 }}>
+                      <div className="progress-fill" style={{ width: `${p}%`, background: m.color }} />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
+      ) : (
+        <div style={{ fontSize: 12, color: 'var(--text-3)', fontFamily: 'var(--mono)' }}>no logs yet</div>
       )}
     </div>
   );
