@@ -14,7 +14,6 @@ const METRICS = [
   { key: 'steps',    label: 'steps',    unit: '',    color: '#2D7A5F', goal: 8000  },
   { key: 'calories', label: 'cal',      unit: '',    color: '#2B5FA8', goal: 2000  },
   { key: 'protein',  label: 'protein',  unit: 'g',   color: '#5B4DB8', goal: 150   },
-  { key: 'sat_fat',  label: 'sat fat',  unit: 'g',   color: '#A05C0A', goal: 20    },
   { key: 'weight',   label: 'weight',   unit: 'lbs', color: '#B83232', goal: null  },
 ];
 
@@ -24,7 +23,6 @@ const pct = (val, goal) => goal ? Math.min(100, Math.round((Number(val) / Number
 const initials = name => name.trim().split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 2);
 const colorFor = (idx) => AVATAR_COLORS[idx % AVATAR_COLORS.length];
 
-// ── App ──────────────────────────────────────────────────────────────────────
 export default function App() {
   const [users, setUsers] = useState([]);
   const [logs, setLogs] = useState([]);
@@ -69,12 +67,10 @@ export default function App() {
     return s;
   };
 
-  const weekDates = () => {
-    return Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(); d.setDate(d.getDate() - (6 - i));
-      return d.toISOString().split('T')[0];
-    });
-  };
+  const weekDates = () => Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(); d.setDate(d.getDate() - (6 - i));
+    return d.toISOString().split('T')[0];
+  });
 
   const saveUser = async (name, goals) => {
     const colorIdx = users.length % AVATAR_COLORS.length;
@@ -100,8 +96,8 @@ export default function App() {
   };
 
   if (loading) return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', gap: 12, color: 'var(--text-2)' }}>
-      <div style={{ fontFamily: 'var(--mono)', fontSize: 14 }}>loading squad...</div>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', color: 'var(--text-2)' }}>
+      <div style={{ fontFamily: 'var(--mono)', fontSize: 14 }}>loading...</div>
     </div>
   );
 
@@ -138,12 +134,14 @@ export default function App() {
   );
 }
 
-// ── Header ───────────────────────────────────────────────────────────────────
 function Header({ me, users, onSwitch, onAdd }) {
   const [open, setOpen] = useState(false);
   return (
     <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border)' }}>
-      <div style={{ fontFamily: 'var(--mono)', fontWeight: 500, fontSize: 15, letterSpacing: '-0.01em' }}>health squad</div>
+      <div>
+        <div style={{ fontFamily: 'var(--mono)', fontWeight: 500, fontSize: 15, letterSpacing: '-0.01em' }}>macro pub</div>
+        <div style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--mono)', marginTop: 1 }}>the macros and maladies of man</div>
+      </div>
       {me && (
         <div style={{ position: 'relative' }}>
           <button onClick={() => setOpen(!open)} style={{ display: 'flex', alignItems: 'center', gap: 8, borderRadius: 20, padding: '5px 10px 5px 5px' }}>
@@ -152,7 +150,7 @@ function Header({ me, users, onSwitch, onAdd }) {
             <span style={{ fontSize: 11, color: 'var(--text-3)' }}>▾</span>
           </button>
           {open && (
-            <div style={{ position: 'absolute', right: 0, top: 38, background: 'var(--surface)', border: '1px solid var(--border-strong)', borderRadius: 12, minWidth: 170, zIndex: 50, overflow: 'hidden', boxShadow: '0 8px 24px rgba(0,0,0,0.1)' }}>
+            <div style={{ position: 'absolute', right: 0, top: 44, background: 'var(--surface)', border: '1px solid var(--border-strong)', borderRadius: 12, minWidth: 170, zIndex: 50, overflow: 'hidden', boxShadow: '0 8px 24px rgba(0,0,0,0.1)' }}>
               {users.map(u => (
                 <div key={u.id} onClick={() => { onSwitch(u); setOpen(false); }} style={{ padding: '9px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, background: u.id === me.id ? 'var(--bg)' : 'transparent' }}>
                   <div className="avatar" style={{ ...colorFor(u.color_idx || 0), width: 24, height: 24, fontSize: 10 }}>{initials(u.name)}</div>
@@ -171,7 +169,6 @@ function Header({ me, users, onSwitch, onAdd }) {
   );
 }
 
-// ── Squad view ───────────────────────────────────────────────────────────────
 function SquadView({ users, getLog, streak }) {
   if (!users.length) return <Empty msg="no squad yet" />;
   const dow = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
@@ -186,15 +183,21 @@ function SquadView({ users, getLog, streak }) {
 function SquadCard({ user, log, streak }) {
   const goals = user.goals || {};
   const showMetrics = METRICS.filter(m => log?.[m.key] != null && log[m.key] !== '');
+  const didExercise = log?.exercised === true;
+  const hasAnyData = showMetrics.length > 0 || log?.exercised != null;
+
   return (
     <div className="card">
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: showMetrics.length ? 14 : 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: hasAnyData ? 14 : 0 }}>
         <div className="avatar" style={colorFor(user.color_idx || 0)}>{initials(user.name)}</div>
         <div style={{ flex: 1 }}>
           <div style={{ fontWeight: 500, fontSize: 14 }}>{user.name}</div>
           <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
             {streak > 0 && <span className="badge badge-amber">🔥 {streak}d</span>}
             <span className={`badge ${log ? 'badge-green' : 'badge-gray'}`}>{log ? '✓ logged' : 'not yet'}</span>
+            {log?.exercised != null && (
+              <span className={`badge ${didExercise ? 'badge-blue' : 'badge-gray'}`}>{didExercise ? '💪 worked out' : '🛋 rest day'}</span>
+            )}
           </div>
         </div>
       </div>
@@ -207,7 +210,10 @@ function SquadCard({ user, log, streak }) {
             return (
               <div key={m.key} style={{ background: 'var(--bg)', borderRadius: 8, padding: '10px 10px 8px', textAlign: 'center' }}>
                 <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 3 }}>{m.label}</div>
-                <div style={{ fontFamily: 'var(--mono)', fontWeight: 500, fontSize: 14 }}>{m.key === 'weight' ? fmt(val, 1) : fmt(val)}{m.unit && <span style={{ fontSize: 10, color: 'var(--text-3)', marginLeft: 1 }}>{m.unit}</span>}</div>
+                <div style={{ fontFamily: 'var(--mono)', fontWeight: 500, fontSize: 14 }}>
+                  {m.key === 'weight' ? fmt(val, 1) : fmt(val)}
+                  {m.unit && <span style={{ fontSize: 10, color: 'var(--text-3)', marginLeft: 1 }}>{m.unit}</span>}
+                </div>
                 {p !== null && (
                   <div>
                     <div className="progress-track" style={{ marginTop: 6 }}>
@@ -225,9 +231,10 @@ function SquadCard({ user, log, streak }) {
   );
 }
 
-// ── Me view ──────────────────────────────────────────────────────────────────
 function MeView({ me, log, streak, weekDates, getLog, onLog }) {
   const goals = me.goals || {};
+  const didExercise = log?.exercised;
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -242,6 +249,19 @@ function MeView({ me, log, streak, weekDates, getLog, onLog }) {
           ? <span className="badge badge-green">✓ logged</span>
           : <button className="btn-primary" onClick={onLog} style={{ borderRadius: 20, padding: '6px 14px', fontSize: 13 }}>log today</button>
         }
+      </div>
+
+      {/* Exercise toggle */}
+      <div className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <div style={{ fontWeight: 500, fontSize: 14 }}>exercise</div>
+          <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>did you work out today?</div>
+        </div>
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 20 }}>
+          {log?.exercised == null ? <span style={{ color: 'var(--text-3)' }}>—</span>
+            : didExercise ? <span>💪</span>
+            : <span>🛋</span>}
+        </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10 }}>
@@ -272,7 +292,9 @@ function MeView({ me, log, streak, weekDates, getLog, onLog }) {
         <div style={{ fontSize: 12, fontFamily: 'var(--mono)', color: 'var(--text-2)', marginBottom: 12 }}>this week</div>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
           {weekDates.map(date => {
-            const hasLog = !!getLog(date);
+            const dayLog = getLog(date);
+            const hasLog = !!dayLog;
+            const exercised = dayLog?.exercised;
             const isToday = date === today();
             const d = new Date(date + 'T12:00:00');
             return (
@@ -281,7 +303,8 @@ function MeView({ me, log, streak, weekDates, getLog, onLog }) {
                   {d.toLocaleDateString('en-US', { weekday: 'narrow' })}
                 </div>
                 <div style={{ width: 10, height: 10, borderRadius: '50%', margin: '0 auto', background: hasLog ? '#2D7A5F' : 'var(--bg)', border: isToday && !hasLog ? '2px solid #2D7A5F' : '1px solid var(--border)' }} />
-                {isToday && <div style={{ fontSize: 9, color: '#2D7A5F', marginTop: 3, fontFamily: 'var(--mono)' }}>now</div>}
+                {hasLog && exercised && <div style={{ fontSize: 10, marginTop: 3 }}>💪</div>}
+                {isToday && !hasLog && <div style={{ fontSize: 9, color: '#2D7A5F', marginTop: 3, fontFamily: 'var(--mono)' }}>now</div>}
               </div>
             );
           })}
@@ -291,7 +314,6 @@ function MeView({ me, log, streak, weekDates, getLog, onLog }) {
   );
 }
 
-// ── History ──────────────────────────────────────────────────────────────────
 function HistoryView({ me, weekDates, getLog }) {
   const goals = me.goals || {};
   const entries = weekDates.map(d => ({ date: d, log: getLog(d) })).filter(e => e.log).reverse();
@@ -304,8 +326,15 @@ function HistoryView({ me, weekDates, getLog }) {
         const shown = METRICS.filter(m => log[m.key] != null && log[m.key] !== '');
         return (
           <div key={date} className="card">
-            <div style={{ fontSize: 12, fontFamily: 'var(--mono)', color: 'var(--text-2)', marginBottom: 12 }}>
-              {d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }).toLowerCase()}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <div style={{ fontSize: 12, fontFamily: 'var(--mono)', color: 'var(--text-2)' }}>
+                {d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }).toLowerCase()}
+              </div>
+              {log.exercised != null && (
+                <span className={`badge ${log.exercised ? 'badge-blue' : 'badge-gray'}`} style={{ fontSize: 11 }}>
+                  {log.exercised ? '💪 worked out' : '🛋 rest day'}
+                </span>
+              )}
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(shown.length, 4)}, 1fr)`, gap: 8 }}>
               {shown.map(m => {
@@ -315,7 +344,8 @@ function HistoryView({ me, weekDates, getLog }) {
                   <div key={m.key} style={{ background: 'var(--bg)', borderRadius: 8, padding: '8px 10px' }}>
                     <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{m.label}</div>
                     <div style={{ fontFamily: 'var(--mono)', fontWeight: 500, fontSize: 15, marginTop: 2 }}>
-                      {m.key === 'weight' ? fmt(log[m.key], 1) : fmt(log[m.key])}{m.unit && <span style={{ fontSize: 10, color: 'var(--text-3)', marginLeft: 2 }}>{m.unit}</span>}
+                      {m.key === 'weight' ? fmt(log[m.key], 1) : fmt(log[m.key])}
+                      {m.unit && <span style={{ fontSize: 10, color: 'var(--text-3)', marginLeft: 2 }}>{m.unit}</span>}
                     </div>
                     {p !== null && (
                       <div className="progress-track" style={{ marginTop: 6 }}>
@@ -334,15 +364,14 @@ function HistoryView({ me, weekDates, getLog }) {
   );
 }
 
-// ── Log sheet ────────────────────────────────────────────────────────────────
 function LogSheet({ me, existing, onSave, onClose }) {
   const goals = me.goals || {};
   const [data, setData] = useState({
     steps: existing?.steps ?? '',
     calories: existing?.calories ?? '',
     protein: existing?.protein ?? '',
-    sat_fat: existing?.sat_fat ?? '',
     weight: existing?.weight ?? '',
+    exercised: existing?.exercised ?? null,
     notes: existing?.notes ?? '',
   });
   const set = (k, v) => setData(d => ({ ...d, [k]: v }));
@@ -354,13 +383,33 @@ function LogSheet({ me, existing, onSave, onClose }) {
           <div style={{ fontWeight: 500 }}>log today <span style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text-3)' }}>{new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span></div>
           <button onClick={onClose} style={{ border: 'none', background: 'none', fontSize: 18, padding: 4, color: 'var(--text-2)' }}>✕</button>
         </div>
+
+        {/* Exercise toggle */}
+        <div style={{ marginBottom: 18 }}>
+          <label>exercise</label>
+          <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+            <button
+              onClick={() => set('exercised', true)}
+              style={{ flex: 1, padding: '10px', borderRadius: 10, fontSize: 14, background: data.exercised === true ? '#E8F5EF' : 'var(--surface)', borderColor: data.exercised === true ? '#2D7A5F' : 'var(--border-strong)', color: data.exercised === true ? '#2D7A5F' : 'var(--text-2)', fontWeight: data.exercised === true ? 500 : 400 }}
+            >
+              💪 yes
+            </button>
+            <button
+              onClick={() => set('exercised', false)}
+              style={{ flex: 1, padding: '10px', borderRadius: 10, fontSize: 14, background: data.exercised === false ? '#EEECEA' : 'var(--surface)', borderColor: data.exercised === false ? '#888' : 'var(--border-strong)', color: data.exercised === false ? 'var(--text)' : 'var(--text-2)', fontWeight: data.exercised === false ? 500 : 400 }}
+            >
+              🛋 rest day
+            </button>
+          </div>
+        </div>
+
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
           {METRICS.map(m => {
             const goal = goals[m.key] || m.goal;
             return (
               <div key={m.key}>
                 <label>{m.label}{m.unit && ` (${m.unit})`}</label>
-                <input type="number" min="0" value={data[m.key]} onChange={e => set(m.key, e.target.value)} placeholder={goal ? `goal: ${goal}` : '—'} step={m.key === 'weight' ? '0.1' : '1'} />
+                <input type="number" min="0" value={data[m.key]} onChange={e => set(m.key, e.target.value)} placeholder={goal ? `goal: ${goal}` : 'optional'} step={m.key === 'weight' ? '0.1' : '1'} />
               </div>
             );
           })}
@@ -377,17 +426,16 @@ function LogSheet({ me, existing, onSave, onClose }) {
   );
 }
 
-// ── Onboard ──────────────────────────────────────────────────────────────────
 function Onboard({ users, onAdd, onSelect }) {
   const [step, setStep] = useState(users.length ? 'pick' : 'name');
   const [name, setName] = useState('');
-  const [goals, setGoals] = useState({ steps: 8000, calories: 2000, protein: 150, sat_fat: 20, weight: '' });
+  const [goals, setGoals] = useState({ steps: 8000, calories: 2000, protein: 150, weight: '' });
   const setG = (k, v) => setGoals(g => ({ ...g, [k]: v }));
 
   return (
     <div style={{ maxWidth: 400, margin: '0 auto', padding: '60px 20px' }}>
-      <div style={{ fontFamily: 'var(--mono)', fontSize: 22, fontWeight: 500, marginBottom: 6 }}>health squad</div>
-      <div style={{ color: 'var(--text-2)', fontSize: 14, marginBottom: 36 }}>track together, stay honest</div>
+      <div style={{ fontFamily: 'var(--mono)', fontSize: 22, fontWeight: 500, marginBottom: 4 }}>macro pub</div>
+      <div style={{ color: 'var(--text-3)', fontSize: 12, fontFamily: 'var(--mono)', marginBottom: 36 }}>the macros and maladies of man</div>
 
       {step === 'pick' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -419,10 +467,15 @@ function Onboard({ users, onAdd, onSelect }) {
       {step === 'goals' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 4 }}>set your daily targets</div>
-          {METRICS.map(m => (
+          {[
+            { key: 'steps', label: 'steps', unit: null, placeholder: '8000' },
+            { key: 'calories', label: 'calories', unit: null, placeholder: '2000' },
+            { key: 'protein', label: 'protein', unit: 'g', placeholder: '150' },
+            { key: 'weight', label: 'target weight', unit: 'lbs', placeholder: 'optional' },
+          ].map(m => (
             <div key={m.key}>
               <label>{m.label}{m.unit && ` (${m.unit})`}</label>
-              <input type="number" min="0" value={goals[m.key]} onChange={e => setG(m.key, e.target.value)} placeholder={m.goal ? String(m.goal) : 'optional'} />
+              <input type="number" min="0" value={goals[m.key]} onChange={e => setG(m.key, e.target.value)} placeholder={m.placeholder} />
             </div>
           ))}
           <button className="btn-primary" onClick={() => onAdd(name.trim(), goals)} style={{ padding: '12px', marginTop: 4, fontSize: 15 }}>
