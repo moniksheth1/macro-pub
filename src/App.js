@@ -11,17 +11,51 @@ const AVATAR_COLORS = [
 ];
 
 const METRICS = [
-  { key: 'steps',    label: 'steps',    unit: '',    color: '#2D7A5F', goal: 8000  },
-  { key: 'calories', label: 'cal',      unit: '',    color: '#2B5FA8', goal: 2000  },
-  { key: 'protein',  label: 'protein',  unit: 'g',   color: '#5B4DB8', goal: 150   },
-  { key: 'weight',   label: 'weight',   unit: 'lbs', color: '#B83232', goal: null  },
+  { key: 'steps',    label: 'steps',    unit: '',    color: '#2D7A5F', goal: 8000 },
+  { key: 'calories', label: 'cal',      unit: '',    color: '#2B5FA8', goal: 2000 },
+  { key: 'protein',  label: 'protein',  unit: 'g',   color: '#5B4DB8', goal: 150  },
+  { key: 'weight',   label: 'weight',   unit: 'lbs', color: '#B83232', goal: null },
 ];
 
-const today = () => new Date().toISOString().split('T')[0];
+const SCORE_METRICS = METRICS.filter(m => m.key !== 'weight');
+
+const todayStr = () => new Date().toISOString().split('T')[0];
 const fmt = (n, d = 0) => n == null || n === '' ? '—' : d > 0 ? Number(n).toFixed(d) : Math.round(Number(n)).toLocaleString();
 const pct = (val, goal) => goal ? Math.min(100, Math.round((Number(val) / Number(goal)) * 100)) : null;
 const initials = name => name.trim().split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 2);
-const colorFor = (idx) => AVATAR_COLORS[idx % AVATAR_COLORS.length];
+const colorFor = idx => AVATAR_COLORS[idx % AVATAR_COLORS.length];
+
+const avgGoalScore = (userLogs, goals) => {
+  const today = todayStr();
+  const scorableLogs = userLogs.filter(l => l.date !== today);
+  if (!scorableLogs.length) return null;
+  const dayScores = scorableLogs.map(log => {
+    const scores = SCORE_METRICS.map(m => {
+      const goal = goals[m.key] || m.goal;
+      const val = log[m.key];
+      if (!goal || val == null || val === '') return null;
+      return Math.min(100, (Number(val) / Number(goal)) * 100);
+    }).filter(s => s !== null);
+    if (!scores.length) return null;
+    return scores.reduce((a, b) => a + b, 0) / scores.length;
+  }).filter(s => s !== null);
+  if (!dayScores.length) return null;
+  return Math.round(dayScores.reduce((a, b) => a + b, 0) / dayScores.length);
+};
+
+const scoreColor = s => s >= 80 ? '#2D7A5F' : s >= 60 ? '#A05C0A' : '#B83232';
+
+const dateOptions = () => {
+  const opts = [];
+  for (let i = 0; i < 30; i++) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const val = d.toISOString().split('T')[0];
+    const label = i === 0 ? 'today' : i === 1 ? 'yesterday' : d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    opts.push({ val, label });
+  }
+  return opts;
+};
 
 export default function App() {
   const [users, setUsers] = useState([]);
@@ -30,6 +64,7 @@ export default function App() {
   const [view, setView] = useState('squad');
   const [showOnboard, setShowOnboard] = useState(false);
   const [showLog, setShowLog] = useState(false);
+  const [logDate, setLogDate] = useState(todayStr());
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
@@ -45,7 +80,7 @@ export default function App() {
       if (found) setMe(found);
       else setShowOnboard(true);
     } else {
-      setShowOnboard(u?.length === 0);
+      setShowOnboard(!u?.length);
     }
     setLoading(false);
   }, []);
@@ -53,16 +88,16 @@ export default function App() {
   useEffect(() => { load(); }, [load]);
 
   const getLog = (userId, date) => logs.find(l => l.user_id === userId && l.date === date) || null;
-  const todayLog = me ? getLog(me.id, today()) : null;
+  const todayLog = me ? getLog(me.id, todayStr()) : null;
+  const userLogs = uid => logs.filter(l => l.user_id === uid);
 
-  const streak = (userId) => {
+  const streak = userId => {
     let s = 0;
     const d = new Date();
     while (true) {
       const date = d.toISOString().split('T')[0];
       if (!logs.find(l => l.user_id === userId && l.date === date)) break;
-      s++;
-      d.setDate(d.getDate() - 1);
+      s++; d.setDate(d.getDate() - 1);
     }
     return s;
   };
@@ -83,17 +118,19 @@ export default function App() {
     }
   };
 
-  const saveLog = async (userId, data) => {
-    const existing = getLog(userId, today());
+  const saveLog = async (userId, date, data) => {
+    const existing = getLog(userId, date);
     if (existing) {
       const { data: updated } = await supabase.from('logs').update(data).eq('id', existing.id).select().single();
       if (updated) setLogs(prev => prev.map(l => l.id === updated.id ? updated : l));
     } else {
-      const { data: created } = await supabase.from('logs').insert({ user_id: userId, date: today(), ...data }).select().single();
+      const { data: created } = await supabase.from('logs').insert({ user_id: userId, date, ...data }).select().single();
       if (created) setLogs(prev => [created, ...prev]);
     }
     setShowLog(false);
   };
+
+  const openLog = (date = todayStr()) => { setLogDate(date); setShowLog(true); };
 
   if (loading) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', color: 'var(--text-2)' }}>
@@ -116,19 +153,19 @@ export default function App() {
         </div>
       </div>
       <div style={{ padding: 16 }} className="fade-in">
-        {view === 'squad' && <SquadView users={users} getLog={u => getLog(u.id, today())} streak={streak} />}
-        {view === 'me' && me && <MeView me={me} log={todayLog} streak={streak(me.id)} weekDates={weekDates()} getLog={d => getLog(me.id, d)} onLog={() => setShowLog(true)} />}
-        {view === 'history' && me && <HistoryView me={me} weekDates={weekDates()} getLog={d => getLog(me.id, d)} />}
+        {view === 'squad' && <SquadView users={users} userLogs={userLogs} getLog={u => getLog(u.id, todayStr())} streak={streak} />}
+        {view === 'me' && me && <MeView me={me} log={todayLog} streak={streak(me.id)} weekDates={weekDates()} getLog={d => getLog(me.id, d)} onLog={openLog} />}
+        {view === 'history' && me && <HistoryView me={me} logs={userLogs(me.id)} onLog={openLog} />}
       </div>
       {view === 'me' && (
         <div style={{ position: 'fixed', bottom: 24, right: 20 }}>
-          <button className="btn-primary" onClick={() => setShowLog(true)} style={{ borderRadius: 24, padding: '10px 22px', fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button className="btn-primary" onClick={() => openLog()} style={{ borderRadius: 24, padding: '10px 22px', fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
             + log today
           </button>
         </div>
       )}
       {showLog && me && (
-        <LogSheet me={me} existing={todayLog} onSave={d => saveLog(me.id, d)} onClose={() => setShowLog(false)} />
+        <LogSheet me={me} date={logDate} existing={getLog(me.id, logDate)} onSave={d => saveLog(me.id, logDate, d)} onClose={() => setShowLog(false)} onDateChange={setLogDate} />
       )}
     </div>
   );
@@ -169,57 +206,80 @@ function Header({ me, users, onSwitch, onAdd }) {
   );
 }
 
-function SquadView({ users, getLog, streak }) {
+function SquadView({ users, userLogs, getLog, streak }) {
   if (!users.length) return <Empty msg="no squad yet" />;
   const dow = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  const ranked = [...users].map(u => ({
+    u, score: avgGoalScore(userLogs(u.id), u.goals || {}),
+    log: getLog(u), s: streak(u.id),
+  })).sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ fontSize: 12, color: 'var(--text-3)', fontFamily: 'var(--mono)', paddingBottom: 4 }}>{dow.toLowerCase()}</div>
-      {users.map(u => <SquadCard key={u.id} user={u} log={getLog(u)} streak={streak(u.id)} />)}
+      {ranked.map(({ u, score, log, s }, i) => (
+        <SquadCard key={u.id} user={u} log={log} streak={s} score={score} rank={i + 1} />
+      ))}
     </div>
   );
 }
 
-function SquadCard({ user, log, streak }) {
+function SquadCard({ user, log, streak, score, rank }) {
   const goals = user.goals || {};
   const showMetrics = METRICS.filter(m => log?.[m.key] != null && log[m.key] !== '');
   const didExercise = log?.exercised === true;
-  const hasAnyData = showMetrics.length > 0 || log?.exercised != null;
 
   return (
     <div className="card">
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: hasAnyData ? 14 : 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-3)', width: 18, textAlign: 'center', flexShrink: 0 }}>
+          {score != null ? `#${rank}` : '—'}
+        </div>
         <div className="avatar" style={colorFor(user.color_idx || 0)}>{initials(user.name)}</div>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: 500, fontSize: 14 }}>{user.name}</div>
-          <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
-            {streak > 0 && <span className="badge badge-amber">🔥 {streak}d</span>}
-            <span className={`badge ${log ? 'badge-green' : 'badge-gray'}`}>{log ? '✓ logged' : 'not yet'}</span>
-            {log?.exercised != null && (
-              <span className={`badge ${didExercise ? 'badge-blue' : 'badge-gray'}`}>{didExercise ? '💪 worked out' : '🛋 rest day'}</span>
-            )}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <span style={{ fontWeight: 500, fontSize: 14 }}>{user.name}</span>
+            {streak > 0 && <span className="badge badge-amber" style={{ fontSize: 10 }}>🔥 {streak}d</span>}
           </div>
+          {score != null ? (
+            <div style={{ marginTop: 6 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                <span style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--mono)' }}>avg goal score</span>
+                <span style={{ fontSize: 12, fontFamily: 'var(--mono)', fontWeight: 500, color: scoreColor(score) }}>{score}%</span>
+              </div>
+              <div className="progress-track">
+                <div className="progress-fill" style={{ width: `${score}%`, background: scoreColor(score) }} />
+              </div>
+            </div>
+          ) : (
+            <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 3 }}>no completed days yet</div>
+          )}
+        </div>
+        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+          <div className={`badge ${log ? 'badge-green' : 'badge-gray'}`} style={{ fontSize: 10 }}>
+            {log ? '✓ today' : 'not yet'}
+          </div>
+          {log?.exercised != null && (
+            <div style={{ fontSize: 13, marginTop: 4 }}>{didExercise ? '💪' : '🛋'}</div>
+          )}
         </div>
       </div>
       {showMetrics.length > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(showMetrics.length, 4)}, 1fr)`, gap: 8 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(showMetrics.length, 4)}, 1fr)`, gap: 8, marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
           {showMetrics.map(m => {
             const val = log[m.key];
             const goal = goals[m.key] || m.goal;
             const p = pct(val, goal);
             return (
-              <div key={m.key} style={{ background: 'var(--bg)', borderRadius: 8, padding: '10px 10px 8px', textAlign: 'center' }}>
-                <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 3 }}>{m.label}</div>
-                <div style={{ fontFamily: 'var(--mono)', fontWeight: 500, fontSize: 14 }}>
+              <div key={m.key} style={{ background: 'var(--bg)', borderRadius: 8, padding: '8px 10px', textAlign: 'center' }}>
+                <div style={{ fontSize: 10, color: 'var(--text-3)', marginBottom: 2 }}>{m.label}</div>
+                <div style={{ fontFamily: 'var(--mono)', fontWeight: 500, fontSize: 13 }}>
                   {m.key === 'weight' ? fmt(val, 1) : fmt(val)}
                   {m.unit && <span style={{ fontSize: 10, color: 'var(--text-3)', marginLeft: 1 }}>{m.unit}</span>}
                 </div>
                 {p !== null && (
-                  <div>
-                    <div className="progress-track" style={{ marginTop: 6 }}>
-                      <div className="progress-fill" style={{ width: `${p}%`, background: m.color }} />
-                    </div>
-                    <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 3, fontFamily: 'var(--mono)' }}>{p}%</div>
+                  <div className="progress-track" style={{ marginTop: 4 }}>
+                    <div className="progress-fill" style={{ width: `${p}%`, background: m.color }} />
                   </div>
                 )}
               </div>
@@ -234,7 +294,6 @@ function SquadCard({ user, log, streak }) {
 function MeView({ me, log, streak, weekDates, getLog, onLog }) {
   const goals = me.goals || {};
   const didExercise = log?.exercised;
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -245,25 +304,19 @@ function MeView({ me, log, streak, weekDates, getLog, onLog }) {
             {streak > 0 ? `🔥 ${streak}-day streak` : 'log today to start your streak'}
           </div>
         </div>
-        {log
-          ? <span className="badge badge-green">✓ logged</span>
-          : <button className="btn-primary" onClick={onLog} style={{ borderRadius: 20, padding: '6px 14px', fontSize: 13 }}>log today</button>
-        }
+        {log ? <span className="badge badge-green">✓ logged</span>
+          : <button className="btn-primary" onClick={() => onLog()} style={{ borderRadius: 20, padding: '6px 14px', fontSize: 13 }}>log today</button>}
       </div>
-
-      {/* Exercise toggle */}
       <div className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
           <div style={{ fontWeight: 500, fontSize: 14 }}>exercise</div>
           <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>did you work out today?</div>
         </div>
-        <div style={{ fontFamily: 'var(--mono)', fontSize: 20 }}>
-          {log?.exercised == null ? <span style={{ color: 'var(--text-3)' }}>—</span>
-            : didExercise ? <span>💪</span>
-            : <span>🛋</span>}
+        <div style={{ fontSize: 20 }}>
+          {log?.exercised == null ? <span style={{ color: 'var(--text-3)', fontFamily: 'var(--mono)' }}>—</span>
+            : didExercise ? '💪' : '🛋'}
         </div>
       </div>
-
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10 }}>
         {METRICS.map(m => {
           const val = log?.[m.key];
@@ -287,24 +340,21 @@ function MeView({ me, log, streak, weekDates, getLog, onLog }) {
           );
         })}
       </div>
-
       <div className="card">
         <div style={{ fontSize: 12, fontFamily: 'var(--mono)', color: 'var(--text-2)', marginBottom: 12 }}>this week</div>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
           {weekDates.map(date => {
             const dayLog = getLog(date);
-            const hasLog = !!dayLog;
-            const exercised = dayLog?.exercised;
-            const isToday = date === today();
+            const isToday = date === todayStr();
             const d = new Date(date + 'T12:00:00');
             return (
               <div key={date} style={{ textAlign: 'center', flex: 1 }}>
                 <div style={{ fontSize: 10, color: 'var(--text-3)', marginBottom: 6, fontFamily: 'var(--mono)' }}>
                   {d.toLocaleDateString('en-US', { weekday: 'narrow' })}
                 </div>
-                <div style={{ width: 10, height: 10, borderRadius: '50%', margin: '0 auto', background: hasLog ? '#2D7A5F' : 'var(--bg)', border: isToday && !hasLog ? '2px solid #2D7A5F' : '1px solid var(--border)' }} />
-                {hasLog && exercised && <div style={{ fontSize: 10, marginTop: 3 }}>💪</div>}
-                {isToday && !hasLog && <div style={{ fontSize: 9, color: '#2D7A5F', marginTop: 3, fontFamily: 'var(--mono)' }}>now</div>}
+                <div style={{ width: 10, height: 10, borderRadius: '50%', margin: '0 auto', background: dayLog ? '#2D7A5F' : 'var(--bg)', border: isToday && !dayLog ? '2px solid #2D7A5F' : '1px solid var(--border)' }} />
+                {dayLog?.exercised && <div style={{ fontSize: 10, marginTop: 3 }}>💪</div>}
+                {isToday && !dayLog && <div style={{ fontSize: 9, color: '#2D7A5F', marginTop: 3, fontFamily: 'var(--mono)' }}>now</div>}
               </div>
             );
           })}
@@ -314,49 +364,55 @@ function MeView({ me, log, streak, weekDates, getLog, onLog }) {
   );
 }
 
-function HistoryView({ me, weekDates, getLog }) {
+function HistoryView({ me, logs, onLog }) {
   const goals = me.goals || {};
-  const entries = weekDates.map(d => ({ date: d, log: getLog(d) })).filter(e => e.log).reverse();
-  if (!entries.length) return <Empty msg="no logs yet — hit 'me' and start tracking" />;
+  const sorted = [...logs].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 30);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div style={{ fontSize: 12, color: 'var(--text-3)', fontFamily: 'var(--mono)' }}>last 7 days</div>
-      {entries.map(({ date, log }) => {
-        const d = new Date(date + 'T12:00:00');
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ fontSize: 12, color: 'var(--text-3)', fontFamily: 'var(--mono)' }}>your log</div>
+        <button onClick={() => onLog()} style={{ fontSize: 12, color: 'var(--text-2)', border: '1px dashed var(--border-strong)', borderRadius: 8, padding: '4px 10px' }}>
+          + backfill a day
+        </button>
+      </div>
+      {!sorted.length && <Empty msg="no logs yet" />}
+      {sorted.map(log => {
+        const d = new Date(log.date + 'T12:00:00');
+        const isToday = log.date === todayStr();
         const shown = METRICS.filter(m => log[m.key] != null && log[m.key] !== '');
         return (
-          <div key={date} className="card">
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <div key={log.id} className="card" style={{ cursor: 'pointer' }} onClick={() => onLog(log.date)}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: shown.length ? 12 : 0 }}>
               <div style={{ fontSize: 12, fontFamily: 'var(--mono)', color: 'var(--text-2)' }}>
-                {d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }).toLowerCase()}
+                {isToday ? 'today' : d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }).toLowerCase()}
               </div>
-              {log.exercised != null && (
-                <span className={`badge ${log.exercised ? 'badge-blue' : 'badge-gray'}`} style={{ fontSize: 11 }}>
-                  {log.exercised ? '💪 worked out' : '🛋 rest day'}
-                </span>
-              )}
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                {log.exercised != null && <span style={{ fontSize: 13 }}>{log.exercised ? '💪' : '🛋'}</span>}
+                <span style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--mono)' }}>tap to edit</span>
+              </div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(shown.length, 4)}, 1fr)`, gap: 8 }}>
-              {shown.map(m => {
-                const goal = goals[m.key] || m.goal;
-                const p = pct(log[m.key], goal);
-                return (
-                  <div key={m.key} style={{ background: 'var(--bg)', borderRadius: 8, padding: '8px 10px' }}>
-                    <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{m.label}</div>
-                    <div style={{ fontFamily: 'var(--mono)', fontWeight: 500, fontSize: 15, marginTop: 2 }}>
-                      {m.key === 'weight' ? fmt(log[m.key], 1) : fmt(log[m.key])}
-                      {m.unit && <span style={{ fontSize: 10, color: 'var(--text-3)', marginLeft: 2 }}>{m.unit}</span>}
-                    </div>
-                    {p !== null && (
-                      <div className="progress-track" style={{ marginTop: 6 }}>
-                        <div className="progress-fill" style={{ width: `${p}%`, background: m.color }} />
+            {shown.length > 0 && (
+              <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(shown.length, 4)}, 1fr)`, gap: 8 }}>
+                {shown.map(m => {
+                  const goal = goals[m.key] || m.goal;
+                  const p = pct(log[m.key], goal);
+                  return (
+                    <div key={m.key} style={{ background: 'var(--bg)', borderRadius: 8, padding: '8px 10px' }}>
+                      <div style={{ fontSize: 10, color: 'var(--text-3)' }}>{m.label}</div>
+                      <div style={{ fontFamily: 'var(--mono)', fontWeight: 500, fontSize: 14, marginTop: 2 }}>
+                        {m.key === 'weight' ? fmt(log[m.key], 1) : fmt(log[m.key])}
+                        {m.unit && <span style={{ fontSize: 10, color: 'var(--text-3)', marginLeft: 2 }}>{m.unit}</span>}
                       </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-            {log.notes && <div style={{ marginTop: 10, fontSize: 13, color: 'var(--text-2)', borderTop: '1px solid var(--border)', paddingTop: 10 }}>{log.notes}</div>}
+                      {p !== null && (
+                        <div className="progress-track" style={{ marginTop: 5 }}>
+                          <div className="progress-fill" style={{ width: `${p}%`, background: m.color }} />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         );
       })}
@@ -364,7 +420,7 @@ function HistoryView({ me, weekDates, getLog }) {
   );
 }
 
-function LogSheet({ me, existing, onSave, onClose }) {
+function LogSheet({ me, date, existing, onSave, onClose, onDateChange }) {
   const goals = me.goals || {};
   const [data, setData] = useState({
     steps: existing?.steps ?? '',
@@ -374,30 +430,47 @@ function LogSheet({ me, existing, onSave, onClose }) {
     exercised: existing?.exercised ?? null,
     notes: existing?.notes ?? '',
   });
+
+  useEffect(() => {
+    setData({
+      steps: existing?.steps ?? '',
+      calories: existing?.calories ?? '',
+      protein: existing?.protein ?? '',
+      weight: existing?.weight ?? '',
+      exercised: existing?.exercised ?? null,
+      notes: existing?.notes ?? '',
+    });
+  }, [date, existing]);
+
   const set = (k, v) => setData(d => ({ ...d, [k]: v }));
+  const dates = dateOptions();
 
   return (
     <div className="overlay" onClick={onClose}>
       <div className="sheet slide-up" onClick={e => e.stopPropagation()}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-          <div style={{ fontWeight: 500 }}>log today <span style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text-3)' }}>{new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span></div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+          <div style={{ fontWeight: 500 }}>log entry</div>
           <button onClick={onClose} style={{ border: 'none', background: 'none', fontSize: 18, padding: 4, color: 'var(--text-2)' }}>✕</button>
         </div>
 
-        {/* Exercise toggle */}
+        {/* date picker */}
+        <div style={{ marginBottom: 18 }}>
+          <label>date</label>
+          <select value={date} onChange={e => onDateChange(e.target.value)}>
+            {dates.map(({ val, label }) => (
+              <option key={val} value={val}>{label}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* exercise toggle */}
         <div style={{ marginBottom: 18 }}>
           <label>exercise</label>
           <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-            <button
-              onClick={() => set('exercised', true)}
-              style={{ flex: 1, padding: '10px', borderRadius: 10, fontSize: 14, background: data.exercised === true ? '#E8F5EF' : 'var(--surface)', borderColor: data.exercised === true ? '#2D7A5F' : 'var(--border-strong)', color: data.exercised === true ? '#2D7A5F' : 'var(--text-2)', fontWeight: data.exercised === true ? 500 : 400 }}
-            >
+            <button onClick={() => set('exercised', true)} style={{ flex: 1, padding: '10px', borderRadius: 10, fontSize: 14, background: data.exercised === true ? '#E8F5EF' : 'var(--surface)', borderColor: data.exercised === true ? '#2D7A5F' : 'var(--border-strong)', color: data.exercised === true ? '#2D7A5F' : 'var(--text-2)', fontWeight: data.exercised === true ? 500 : 400 }}>
               💪 yes
             </button>
-            <button
-              onClick={() => set('exercised', false)}
-              style={{ flex: 1, padding: '10px', borderRadius: 10, fontSize: 14, background: data.exercised === false ? '#EEECEA' : 'var(--surface)', borderColor: data.exercised === false ? '#888' : 'var(--border-strong)', color: data.exercised === false ? 'var(--text)' : 'var(--text-2)', fontWeight: data.exercised === false ? 500 : 400 }}
-            >
+            <button onClick={() => set('exercised', false)} style={{ flex: 1, padding: '10px', borderRadius: 10, fontSize: 14, background: data.exercised === false ? '#EEECEA' : 'var(--surface)', borderColor: data.exercised === false ? '#888' : 'var(--border-strong)', color: data.exercised === false ? 'var(--text)' : 'var(--text-2)', fontWeight: data.exercised === false ? 500 : 400 }}>
               🛋 rest day
             </button>
           </div>
@@ -436,7 +509,6 @@ function Onboard({ users, onAdd, onSelect }) {
     <div style={{ maxWidth: 400, margin: '0 auto', padding: '60px 20px' }}>
       <div style={{ fontFamily: 'var(--mono)', fontSize: 22, fontWeight: 500, marginBottom: 4 }}>macro pub</div>
       <div style={{ color: 'var(--text-3)', fontSize: 12, fontFamily: 'var(--mono)', marginBottom: 36 }}>the macros and maladies of man</div>
-
       {step === 'pick' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 8 }}>who are you?</div>
@@ -451,19 +523,15 @@ function Onboard({ users, onAdd, onSelect }) {
           </button>
         </div>
       )}
-
       {step === 'name' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div>
             <label>your name</label>
             <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="first name is fine" autoFocus onKeyDown={e => e.key === 'Enter' && name.trim() && setStep('goals')} />
           </div>
-          <button className="btn-primary" disabled={!name.trim()} onClick={() => setStep('goals')} style={{ padding: '10px' }}>
-            set goals →
-          </button>
+          <button className="btn-primary" disabled={!name.trim()} onClick={() => setStep('goals')} style={{ padding: '10px' }}>set goals →</button>
         </div>
       )}
-
       {step === 'goals' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 4 }}>set your daily targets</div>
@@ -478,9 +546,7 @@ function Onboard({ users, onAdd, onSelect }) {
               <input type="number" min="0" value={goals[m.key]} onChange={e => setG(m.key, e.target.value)} placeholder={m.placeholder} />
             </div>
           ))}
-          <button className="btn-primary" onClick={() => onAdd(name.trim(), goals)} style={{ padding: '12px', marginTop: 4, fontSize: 15 }}>
-            let's go →
-          </button>
+          <button className="btn-primary" onClick={() => onAdd(name.trim(), goals)} style={{ padding: '12px', marginTop: 4, fontSize: 15 }}>let's go →</button>
         </div>
       )}
     </div>
